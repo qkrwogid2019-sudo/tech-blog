@@ -1,29 +1,43 @@
 /* ==========================================================
-  app.js
-  - 건드리지 말아야 할 부분: 로딩/렌더/필터/라우팅 로직
-  - 향이 건드릴 부분: 블로그 제목/소개글/포인트컬러는 CSS :root
+  app.js (GitHub Pages 안정판)
+  user/repo: qkrwogid2019-sudo
 ========================================================== */
 
 const $ = (sel) => document.querySelector(sel);
+const BASE = "/qkrwogid2019-sudo";
+
+/* ---------- utils ---------- */
 
 function fmtDate(iso){
-  // iso: "2025-12-24"
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("ko-KR", { year:"numeric", month:"short", day:"numeric" });
+  return d.toLocaleDateString("ko-KR", {
+    year:"numeric", month:"short", day:"numeric"
+  });
 }
 
+async function fetchJSON(url){
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`JSON 로드 실패: ${url}`);
+  return await res.json();
+}
+
+async function fetchText(url){
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTML 로드 실패: ${url}`);
+  return await res.text();
+}
+
+/* ---------- data ---------- */
+
 async function loadPosts(){
-  const res = await fetch(`/qkrwogid2019-sudo/posts/${post.file}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("posts.json 로드 실패");
-  const data = await res.json();
-  // 최신순
+  const data = await fetchJSON(`${BASE}/posts/posts.json`);
   return data.sort((a,b) => (b.date > a.date ? 1 : -1));
 }
 
 function uniqueTags(posts){
   const set = new Set();
   posts.forEach(p => (p.tags || []).forEach(t => set.add(t)));
-  return Array.from(set).sort((a,b)=>a.localeCompare(b));
+  return Array.from(set).sort();
 }
 
 /* ---------- index ---------- */
@@ -34,7 +48,7 @@ function renderPostCard(p){
 
   return `
     <a class="post-card" data-type="${p.type || "tech"}"
-       href="post.html?slug=${encodeURIComponent(p.slug)}">
+       href="${BASE}/post.html?slug=${encodeURIComponent(p.slug)}">
       <p class="kicker">${fmtDate(p.date)} · ${p.readingTime || "—"} min</p>
       <h2 class="post-title">${p.title}</h2>
       <p class="post-summary">${p.summary || ""}</p>
@@ -46,25 +60,24 @@ function renderPostCard(p){
   `;
 }
 
-
 function mountIndex(posts){
+  $("#year").textContent = new Date().getFullYear();
+
+  const pinned = posts.filter(p => p.pinned);
+  const normal = posts.filter(p => !p.pinned);
+
+  const pinnedEl = $("#pinnedPosts");
+  if (pinnedEl){
+    pinnedEl.innerHTML = pinned.map(renderPostCard).join("");
+  }
+
   const postsEl = $("#posts");
   const emptyEl = $("#empty");
   const searchEl = $("#search");
   const tagEl = $("#tagFilter");
   const chipsEl = $("#tagChips");
-  $("#year").textContent = new Date().getFullYear();
 
   const tags = uniqueTags(posts);
-const pinned = posts.filter(p => p.pinned);
-const normal = posts.filter(p => !p.pinned);
-
-const pinnedEl = document.getElementById("pinnedPosts");
-if (pinnedEl){
-  pinnedEl.innerHTML = pinned.map(renderPostCard).join("");
-}
-
-  // tag filter options
   tags.forEach(t => {
     const opt = document.createElement("option");
     opt.value = t;
@@ -72,18 +85,16 @@ if (pinnedEl){
     tagEl.appendChild(opt);
   });
 
-  // tags section chips
   chipsEl.innerHTML = tags.map(t => `<span class="chip">#${t}</span>`).join(" ");
 
   function apply(){
-    const q = (searchEl.value || "").trim().toLowerCase();
+    const q = (searchEl.value || "").toLowerCase();
     const tag = tagEl.value;
 
-    const filtered = posts.filter(p => {
+    const filtered = normal.filter(p => {
       const hay = `${p.title} ${p.summary || ""} ${(p.tags || []).join(" ")}`.toLowerCase();
-      const matchQ = q ? hay.includes(q) : true;
-      const matchTag = tag ? (p.tags || []).includes(tag) : true;
-      return matchQ && matchTag;
+      return (!q || hay.includes(q)) &&
+             (!tag || (p.tags || []).includes(tag));
     });
 
     postsEl.innerHTML = filtered.map(renderPostCard).join("");
@@ -92,27 +103,23 @@ if (pinnedEl){
 
   searchEl.addEventListener("input", apply);
   tagEl.addEventListener("change", apply);
-
   apply();
 }
 
 /* ---------- post ---------- */
 
 async function mountPost(posts){
-  const params = new URLSearchParams(location.search);
-  const slug = params.get("slug");
   $("#year").textContent = new Date().getFullYear();
 
+  const slug = new URLSearchParams(location.search).get("slug");
   if (!slug){
-    $("#title").textContent = "글을 찾을 수 없음";
-    $("#content").innerHTML = `<p>slug가 없네… 링크가 삐끗했다.</p>`;
+    $("#content").innerHTML = "<p>slug 없음</p>";
     return;
   }
 
   const post = posts.find(p => p.slug === slug);
   if (!post){
-    $("#title").textContent = "글을 찾을 수 없음";
-    $("#content").innerHTML = `<p>posts.json에 이 slug가 없어요: <code>${slug}</code></p>`;
+    $("#content").innerHTML = `<p>posts.json에 없음: ${slug}</p>`;
     return;
   }
 
@@ -120,18 +127,42 @@ async function mountPost(posts){
   $("#meta").textContent = `${fmtDate(post.date)} · ${post.readingTime || "—"} min`;
   $("#title").textContent = post.title;
   $("#summary").textContent = post.summary || "";
-
   $("#chips").innerHTML = (post.tags || []).map(t => `<span class="chip">#${t}</span>`).join("");
 
-  // content: posts/*.html 파일을 그대로 불러와 삽입
-  const res = await fetch(`posts/${post.file}`, { cache: "no-store" });
-  if (!res.ok){
-    $("#content").innerHTML = `<p>본문 파일을 못 불러왔어: <code>${post.file}</code></p>`;
-    return;
-  }
-  const html = await res.text();
+  const html = await fetchText(`${BASE}/posts/${post.file}`);
   $("#content").innerHTML = html;
   enhanceCodeBlocks();
+}
+
+/* ---------- code blocks ---------- */
+
+function enhanceCodeBlocks(){
+  if (window.hljs) hljs.highlightAll();
+
+  document.querySelectorAll("pre code").forEach(code => {
+    const pre = code.parentElement;
+    if (pre.querySelector(".copy-btn")) return;
+
+    const btn = document.createElement("button");
+    btn.className = "copy-btn";
+    btn.textContent = "Copy";
+
+    btn.onclick = async () => {
+      try{
+        await navigator.clipboard.writeText(code.innerText);
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("copied");
+        }, 1200);
+      }catch{
+        btn.textContent = "Failed";
+      }
+    };
+
+    pre.appendChild(btn);
+  });
 }
 
 /* ---------- bootstrap ---------- */
@@ -139,54 +170,14 @@ async function mountPost(posts){
 (async function init(){
   try{
     const posts = await loadPosts();
-    const isPostPage = location.pathname.endsWith("post.html");
-    if (isPostPage) await mountPost(posts);
-    else await mountIndex(posts);
-  }catch(err){
-    console.error(err);
-    const container = document.querySelector(".container");
-    if (container){
-      container.insertAdjacentHTML("beforeend", `
-        <section class="card">
-          <h2 class="card__title">에러</h2>
-          <p class="card__text">posts 데이터를 불러오다가 터졌음. 콘솔 확인 ㄱㄱ</p>
-        </section>
-      `);
-    }
+    const isPost = location.pathname.endsWith("/post.html");
+    isPost ? await mountPost(posts) : mountIndex(posts);
+  }catch(e){
+    console.error(e);
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<pre style="color:red">JS ERROR: ${e.message}</pre>`
+    );
   }
 })();
 
-function enhanceCodeBlocks(){
-  // syntax highlight
-  if (window.hljs){
-    hljs.highlightAll();
-  }
-
-  document.querySelectorAll("pre code").forEach(code => {
-    const pre = code.parentElement;
-
-    // 이미 버튼 있으면 스킵
-    if (pre.querySelector(".copy-btn")) return;
-
-    const btn = document.createElement("button");
-    btn.className = "copy-btn";
-    btn.textContent = "Copy";
-
-    btn.addEventListener("click", async () => {
-      try{
-        await navigator.clipboard.writeText(code.innerText);
-        btn.textContent = "Copied";
-        btn.classList.add("copied");
-
-        setTimeout(() => {
-          btn.textContent = "Copy";
-          btn.classList.remove("copied");
-        }, 1200);
-      }catch(e){
-        btn.textContent = "Failed";
-      }
-    });
-
-    pre.appendChild(btn);
-  });
-}
